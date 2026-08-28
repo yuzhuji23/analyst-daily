@@ -1,0 +1,10 @@
+{
+  "buildCommand": "pnpm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "installCommand": "pnpm install",
+  "functions": {
+    "api/hotspot.ts": { "maxDuration": 60 },
+    "api/term.ts": { "maxDuration": 30 }
+  }
+}
