@@ -1,26 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ALL_LESSONS } from "../data/catalog";
+import { allLabs, nextLab } from "../data/catalog";
 import { reviewSqlLab, type SqlReview } from "../lib/hotspot";
 import { checkQuery, execSql, getDb, SCHEMA_TEXT, type Grid } from "../lib/sqlEngine";
 import { useProgress } from "../state";
 import type { Database } from "sql.js";
 
 export function LabPage() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const taskId = params.get("task");
   const { progress, setProgress } = useProgress();
-  const labs = useMemo(
-    () => ALL_LESSONS.filter((l) => l.lab).map((l) => l.lab!),
-    [],
-  );
-  const current = labs.find((t) => t.id === taskId) ?? labs.find((t) => progress.deferredLabs.includes(t.id)) ?? labs[0];
+  const labs = useMemo(() => allLabs(), []);
+  const queued = nextLab(progress.completedLabs);
+  const current = labs.find((t) => t.id === taskId) ?? queued;
   const [activeId, setActiveId] = useState(current.id);
   const task = labs.find((t) => t.id === activeId) ?? current;
+  const upcoming = nextLab(progress.completedLabs);
 
   useEffect(() => {
     if (taskId) setActiveId(taskId);
   }, [taskId]);
+
   const [db, setDb] = useState<Database | null>(null);
   const [error, setError] = useState("");
   const [sql, setSql] = useState(task.starter);
@@ -30,6 +30,7 @@ export function LabPage() {
   const [showAnswer, setShowAnswer] = useState(false);
   const [review, setReview] = useState<SqlReview | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const showNext = Boolean(ok) && upcoming.id !== task.id;
 
   useEffect(() => {
     getDb()
@@ -46,6 +47,11 @@ export function LabPage() {
     setReview(null);
     setReviewing(false);
   }, [task.id, task.starter]);
+
+  const openTask = (id: string) => {
+    setActiveId(id);
+    setParams({ task: id }, { replace: true });
+  };
 
   const run = () => {
     if (!db) return;
@@ -65,15 +71,16 @@ export function LabPage() {
     if (!db) return;
     const r = checkQuery(db, sql, task.expectedSql);
     setGrid(r.grid);
-    setMsg(r.message);
+    setMsg(r.ok ? "已记下这题，结果和参考一致。" : r.message);
     setOk(r.ok);
     setShowAnswer(true);
     setReview(null);
     if (r.ok) {
       setProgress((p) => ({
         ...p,
-        completedLabs: Array.from(new Set([...p.completedLabs, task.id])),
-        deferredLabs: p.deferredLabs.filter((id) => id !== task.id),
+        completedLabs: Array.from(new Set([...(p.completedLabs ?? []), task.id])),
+        deferredLabs: (p.deferredLabs ?? []).filter((id) => id !== task.id),
+        today: { ...p.today, lab: true },
       }));
     }
     setReviewing(true);
@@ -92,7 +99,7 @@ export function LabPage() {
     <div>
       <h2 className="section-title">SQL 实验室</h2>
       <p className="lead">
-        模拟生活服务 App 的订单与行为数据。手机也能跑，但小屏会挤——有电脑时体验更好。待做的实验会列在下面。
+        模拟生活服务 App 的订单与行为数据。核对通过会记下进度，回来就是下一题。手机也能跑，电脑更舒服。
       </p>
       {error && <p className="err">{error}</p>}
       <div className="grid-2">
@@ -100,7 +107,7 @@ export function LabPage() {
           <label className="muted">当前任务</label>
           <select
             value={task.id}
-            onChange={(e) => setActiveId(e.target.value)}
+            onChange={(e) => openTask(e.target.value)}
             style={{ width: "100%", margin: "0.35rem 0 0.7rem", padding: "0.4rem", background: "var(--card)", border: "1px solid var(--rule)" }}
           >
             {labs.map((t) => (
@@ -119,6 +126,11 @@ export function LabPage() {
             <button className="btn-ghost" disabled={!db || reviewing} onClick={() => void check()}>
               {reviewing ? "正在看你的写法…" : "核对（看参考写法和点评）"}
             </button>
+            {showNext ? (
+              <button className="btn" onClick={() => openTask(upcoming.id)}>
+                下一题
+              </button>
+            ) : null}
           </div>
           {msg && <p className={`toast ${ok === false ? "err" : ok ? "ok" : ""}`}>{msg}</p>}
           {showAnswer ? (

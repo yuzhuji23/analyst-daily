@@ -10,7 +10,26 @@ export function todayIso(d = new Date()): string {
 }
 
 function emptyToday(date: string): ProgressFile["today"] {
-  return { date, news: false, case: false, sql: "pending" };
+  return { date, news: false, case: false, sql: "pending", lab: false };
+}
+
+function normalize(p: ProgressFile): ProgressFile {
+  return {
+    ...p,
+    completed: p.completed ?? [],
+    quiz: p.quiz ?? {},
+    deferredLabs: p.deferredLabs ?? [],
+    completedLabs: p.completedLabs ?? [],
+    newsReadDates: p.newsReadDates ?? [],
+    casesDone: p.casesDone ?? [],
+    today: {
+      date: p.today?.date ?? todayIso(),
+      news: Boolean(p.today?.news),
+      case: Boolean(p.today?.case),
+      sql: p.today?.sql ?? "pending",
+      lab: Boolean(p.today?.lab),
+    },
+  };
 }
 
 export function emptyProgress(): ProgressFile {
@@ -35,7 +54,7 @@ function rollDay(p: ProgressFile): ProgressFile {
   if (p.today.date === today) return p;
   const yest = todayIso(new Date(Date.now() - 86400000));
   const hadWork =
-    p.today.news || p.today.case || p.today.sql === "done" || p.today.sql === "deferred";
+    p.today.news || p.today.case || p.today.lab || p.today.sql === "done" || p.today.sql === "deferred";
   let streak = p.streak;
   if (p.today.date === yest && hadWork) streak += 1;
   else if (p.lastVisit !== today) streak = hadWork && p.today.date === yest ? streak + 1 : 0;
@@ -48,7 +67,7 @@ export function loadProgress(): ProgressFile {
     if (!raw) return emptyProgress();
     const parsed = JSON.parse(raw) as ProgressFile;
     if (parsed.version !== 1) return emptyProgress();
-    return rollDay(parsed);
+    return rollDay(normalize(parsed));
   } catch {
     return emptyProgress();
   }
@@ -111,12 +130,12 @@ export function fromToken(token: string): ProgressFile {
   if (trimmed.startsWith("{")) {
     const parsed = JSON.parse(trimmed) as ProgressFile;
     if (parsed.version !== 1) throw new Error("进度文件版本不支持");
-    return rollDay(parsed);
+    return rollDay(normalize(parsed));
   }
   if (!trimmed.startsWith("AD1.")) throw new Error("不是分析日课的进度口令");
   const json = new TextDecoder().decode(b64ToBytes(trimmed.slice(4)));
   const c = JSON.parse(json) as Compact;
-  return rollDay({
+  return rollDay(normalize({
     version: 1,
     exportedAt: new Date().toISOString(),
     completed: c.c ?? [],
@@ -128,7 +147,7 @@ export function fromToken(token: string): ProgressFile {
     lastVisit: todayIso(),
     streak: c.s ?? 0,
     today: c.t ?? emptyToday(todayIso()),
-  });
+  }));
 }
 
 export function mergeProgress(current: ProgressFile, incoming: ProgressFile): ProgressFile {
@@ -152,6 +171,7 @@ export function mergeProgress(current: ProgressFile, incoming: ProgressFile): Pr
       date: todayIso(),
       news: current.today.news || rolled.today.news,
       case: current.today.case || rolled.today.case,
+      lab: Boolean(current.today.lab || rolled.today.lab),
       sql:
         current.today.sql === "done" || rolled.today.sql === "done"
           ? "done"

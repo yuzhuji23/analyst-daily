@@ -478,7 +478,7 @@ input.secret {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.32rem;
   overflow: hidden;
 }
 .today-slot {
@@ -487,8 +487,8 @@ input.secret {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.7rem 0.85rem;
+  gap: 0.22rem;
+  padding: 0.5rem 0.7rem;
   margin: 0;
 }
 .today-slot header {
@@ -510,8 +510,8 @@ input.secret {
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
   margin: 0;
   font-size: 0.9rem;
   line-height: 1.45;
@@ -538,8 +538,9 @@ input.secret {
 
 @media (min-width: 720px) {
   .shell.home { padding-bottom: 0.85rem; }
-  .today-slot { padding: 0.8rem 0.95rem; }
-  .today-slot h2 { font-size: 1.15rem; }
+  .today-slot { padding: 0.55rem 0.8rem; }
+  .today-slot h2 { font-size: 1.08rem; }
+  .today-copy { -webkit-line-clamp: 2; line-clamp: 2; }
 }
 
 @media (max-height: 700px) {

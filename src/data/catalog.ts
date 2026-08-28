@@ -6,7 +6,7 @@ import { ORAL_LESSONS } from "./oralLessons";
 import { EXCEL_LESSONS, SQL_LESSONS } from "./sqlLessons";
 import { SQL_FOUNDATION } from "./sqlFoundation";
 import { SQL_INTERVIEW } from "./sqlInterview";
-import type { BizCase, Lesson } from "../types";
+import type { BizCase, LabTask, Lesson } from "../types";
 
 function withDrill(c: BizCase): BizCase {
   const d = CASE_DRILL[c.id];
@@ -38,6 +38,20 @@ export function nextSqlLesson(completed: string[]): Lesson {
 
 export function todayCase(completedCases: string[]): BizCase {
   return ALL_CASES.find((c) => !completedCases.includes(c.id)) ?? ALL_CASES[ALL_CASES.length - 1];
+}
+
+export function allLabs(): LabTask[] {
+  return ALL_LESSONS.filter((l) => l.lab).map((l) => l.lab!);
+}
+
+export function nextLab(completedLabs: string[]): LabTask {
+  const labs = allLabs();
+  return labs.find((t) => !completedLabs.includes(t.id)) ?? labs[labs.length - 1];
+}
+
+export function labProgress(doneIds: string[]): { done: number; total: number } {
+  const labs = allLabs();
+  return { done: labs.filter((t) => doneIds.includes(t.id)).length, total: labs.length };
 }
 
 export function sqlProgress(completed: string[]): { done: number; total: number } {

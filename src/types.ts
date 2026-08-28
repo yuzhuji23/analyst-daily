@@ -63,6 +63,7 @@ export type ProgressFile = {
     news: boolean;
     case: boolean;
     sql: "pending" | "done" | "deferred";
+    lab: boolean;
   };
 };
 
