@@ -1,7 +1,7 @@
 import type { Connect, Plugin } from "vite";
-import { apiState, handleHotspot, handleKey, handleTerm } from "./hotspotCore";
+import { apiState, handleHotspot, handleKey, handleSqlReview, handleTerm } from "./hotspotCore";
 
-export { apiState, handleHotspot, handleKey, handleTerm } from "./hotspotCore";
+export { apiState, handleHotspot, handleKey, handleSqlReview, handleTerm } from "./hotspotCore";
 
 export function hotspotApi(apiKey: string): Plugin {
   if (apiKey.trim()) apiState.key = apiKey.trim();
@@ -18,6 +18,10 @@ export function hotspotApi(apiKey: string): Plugin {
       }
       if (path === "/api/term") {
         void handleTerm(req, res, apiState);
+        return;
+      }
+      if (path === "/api/sql-review") {
+        void handleSqlReview(req, res, apiState);
         return;
       }
       next();

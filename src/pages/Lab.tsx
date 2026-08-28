@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ALL_LESSONS } from "../data/catalog";
+import { reviewSqlLab, type SqlReview } from "../lib/hotspot";
 import { checkQuery, execSql, getDb, SCHEMA_TEXT, type Grid } from "../lib/sqlEngine";
 import { useProgress } from "../state";
 import type { Database } from "sql.js";
@@ -26,6 +27,9 @@ export function LabPage() {
   const [grid, setGrid] = useState<Grid | null>(null);
   const [msg, setMsg] = useState("");
   const [ok, setOk] = useState<boolean | null>(null);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [review, setReview] = useState<SqlReview | null>(null);
+  const [reviewing, setReviewing] = useState(false);
 
   useEffect(() => {
     getDb()
@@ -38,34 +42,50 @@ export function LabPage() {
     setGrid(null);
     setMsg("");
     setOk(null);
+    setShowAnswer(false);
+    setReview(null);
+    setReviewing(false);
   }, [task.id, task.starter]);
 
-  const run = (check: boolean) => {
+  const run = () => {
     if (!db) return;
-    if (check) {
-      const r = checkQuery(db, sql, task.expectedSql);
-      setGrid(r.grid);
-      setMsg(r.message);
-      setOk(r.ok);
-      if (r.ok) {
-        setProgress((p) => ({
-          ...p,
-          completedLabs: Array.from(new Set([...p.completedLabs, task.id])),
-          deferredLabs: p.deferredLabs.filter((id) => id !== task.id),
-        }));
-      }
-    } else {
-      try {
-        const g = execSql(db, sql);
-        setGrid(g);
-        setMsg(`返回 ${g.rows.length} 行`);
-        setOk(null);
-      } catch (e) {
-        setGrid(null);
-        setMsg((e as Error).message);
-        setOk(false);
-      }
+    try {
+      const g = execSql(db, sql);
+      setGrid(g);
+      setMsg(`返回 ${g.rows.length} 行`);
+      setOk(null);
+    } catch (e) {
+      setGrid(null);
+      setMsg((e as Error).message);
+      setOk(false);
     }
+  };
+
+  const check = async () => {
+    if (!db) return;
+    const r = checkQuery(db, sql, task.expectedSql);
+    setGrid(r.grid);
+    setMsg(r.message);
+    setOk(r.ok);
+    setShowAnswer(true);
+    setReview(null);
+    if (r.ok) {
+      setProgress((p) => ({
+        ...p,
+        completedLabs: Array.from(new Set([...p.completedLabs, task.id])),
+        deferredLabs: p.deferredLabs.filter((id) => id !== task.id),
+      }));
+    }
+    setReviewing(true);
+    const note = await reviewSqlLab({
+      prompt: `${task.title}。${task.prompt}`,
+      schema: SCHEMA_TEXT,
+      expected: task.expectedSql,
+      student: sql,
+      engine: r.message,
+    });
+    setReview(note);
+    setReviewing(false);
   };
 
   return (
@@ -93,14 +113,28 @@ export function LabPage() {
           <p className="muted">提示：{task.hint}</p>
           <textarea className="code" value={sql} onChange={(e) => setSql(e.target.value)} spellCheck={false} />
           <div className="btn-row">
-            <button className="btn" disabled={!db} onClick={() => run(false)}>
+            <button className="btn" disabled={!db} onClick={run}>
               运行
             </button>
-            <button className="btn-ghost" disabled={!db} onClick={() => run(true)}>
-              核对参考结果
+            <button className="btn-ghost" disabled={!db || reviewing} onClick={() => void check()}>
+              {reviewing ? "正在看你的写法…" : "核对（看参考写法和点评）"}
             </button>
           </div>
           {msg && <p className={`toast ${ok === false ? "err" : ok ? "ok" : ""}`}>{msg}</p>}
+          {showAnswer ? (
+            <div className="callout" style={{ marginTop: "0.85rem" }}>
+              <strong>参考写法</strong>
+              <pre className="sql">{task.expectedSql}</pre>
+            </div>
+          ) : null}
+          {reviewing ? <p className="muted">对照你的 SQL 看差在哪，稍等。</p> : null}
+          {review ? (
+            <div className="callout" style={{ marginTop: "0.75rem" }}>
+              <strong>{ok ? "对照点评" : "你这题差在哪"}</strong>
+              <p style={{ margin: "0.35rem 0 0" }}>{review.plain}</p>
+              {review.fix ? <p style={{ margin: "0.45rem 0 0" }}>{review.fix}</p> : null}
+            </div>
+          ) : null}
           {grid && (
             <div className="table-wrap">
               <table>

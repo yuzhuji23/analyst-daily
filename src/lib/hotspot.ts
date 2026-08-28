@@ -174,3 +174,94 @@ export function useDailyHotspot() {
 
   return { item, loading };
 }
+
+export type SqlReview = { plain: string; fix: string };
+
+export async function reviewSqlLab(input: {
+  prompt: string;
+  schema: string;
+  expected: string;
+  student: string;
+  engine: string;
+}): Promise<SqlReview | null> {
+  const body = { ...input, key: readApiKey() };
+  try {
+    const res = await fetch("/api/sql-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { item?: SqlReview | null };
+      if (data.item?.plain) return data.item;
+    }
+  } catch {
+    /* GitHub Pages 没有这个接口，改走直连 */
+  }
+  return fromBrowserSqlReview(body);
+}
+
+async function fromBrowserSqlReview(body: {
+  key: string;
+  prompt: string;
+  schema: string;
+  expected: string;
+  student: string;
+  engine: string;
+}): Promise<SqlReview | null> {
+  if (!body.key) return null;
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const res = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${body.key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        temperature: 0.3,
+        max_tokens: 700,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "你在改 SQL 作业。只输出 JSON。不要提问。" },
+          {
+            role: "user",
+            content: `读者是商业基础弱的大四学生，在做 SQL 实验室。对照下面这题。
+
+任务：${body.prompt}
+表：${body.schema || "（见任务）"}
+参考写法（这是本题标准答案，不要另起一套口径）：
+${body.expected}
+
+学生写的：
+${body.student || "（空）"}
+
+引擎核对：${body.engine || "未知"}
+
+只输出 JSON：{"plain":"","fix":""}
+要求：大白话；不要提问、不要布置作业、不要夸学生。
+- 如果引擎说结果一致：plain 里说结果对了；写法若不同，用一两句点出差别；fix 留空。
+- 如果报错或结果不对：plain 先说错在哪一步（筛选、连接、分组、去重、排序、日期还是口径），再对照参考写法；fix 用两三句说该怎么改，不要整段重抄参考 SQL。`,
+          },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const text = data.choices?.[0]?.message?.content || "";
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end < start) return null;
+    const row = JSON.parse(text.slice(start, end + 1)) as { plain?: string; fix?: string };
+    const plain = String(row.plain || "").trim();
+    if (!plain) return null;
+    return { plain, fix: String(row.fix || "").trim() };
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}

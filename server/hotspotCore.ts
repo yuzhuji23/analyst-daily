@@ -273,7 +273,7 @@ function readBody(req: IncomingMessage) {
     let size = 0;
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 4000) {
+      if (size > 24000) {
         reject(new Error("too large"));
         return;
       }
@@ -405,6 +405,81 @@ async function handleTerm(req: IncomingMessage, res: ServerResponse, state: { ke
 
 const termMemo = new Map<string, { term: string; plain: string; example: string; watch: string }>();
 
+async function handleSqlReview(req: IncomingMessage, res: ServerResponse, state: { key: string }) {
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+  if (req.method !== "POST") {
+    send(res, 405, { item: null });
+    return;
+  }
+  let extra = "";
+  let prompt = "";
+  let schema = "";
+  let expected = "";
+  let student = "";
+  let engine = "";
+  try {
+    const raw = await readBody(req);
+    const body = raw
+      ? (JSON.parse(raw) as {
+          key?: string;
+          prompt?: string;
+          schema?: string;
+          expected?: string;
+          student?: string;
+          engine?: string;
+        })
+      : {};
+    extra = typeof body.key === "string" ? body.key.trim() : "";
+    prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 800) : "";
+    schema = typeof body.schema === "string" ? body.schema.trim().slice(0, 800) : "";
+    expected = typeof body.expected === "string" ? body.expected.trim().slice(0, 4000) : "";
+    student = typeof body.student === "string" ? body.student.trim().slice(0, 4000) : "";
+    engine = typeof body.engine === "string" ? body.engine.trim().slice(0, 400) : "";
+  } catch {
+    send(res, 200, { item: null });
+    return;
+  }
+  const apiKey = extra || state.key;
+  if (!apiKey || !prompt || !expected) {
+    send(res, 200, { item: null });
+    return;
+  }
+  try {
+    const row = await chat(
+      apiKey,
+      `读者是商业基础弱的大四学生，在做 SQL 实验室。对照下面这题。
+
+任务：${prompt}
+表：${schema || "（见任务）"}
+参考写法（这是本题标准答案，不要另起一套口径）：
+${expected}
+
+学生写的：
+${student || "（空）"}
+
+引擎核对：${engine || "未知"}
+
+只输出 JSON：{"plain":"","fix":""}
+要求：大白话；不要提问、不要布置作业、不要夸学生。
+- 如果引擎说结果一致：plain 里说结果对了；写法若不同，用一两句点出差别；fix 留空。
+- 如果报错或结果不对：plain 先说错在哪一步（筛选、连接、分组、去重、排序、日期还是口径），再对照参考写法；fix 用两三句说该怎么改，不要整段重抄参考 SQL。`,
+      700,
+      "你在改 SQL 作业。只输出 JSON。不要提问。",
+    );
+    const item = {
+      plain: String(row?.plain || "").trim(),
+      fix: String(row?.fix || "").trim(),
+    };
+    send(res, 200, { item: item.plain ? item : null });
+  } catch {
+    send(res, 200, { item: null });
+  }
+}
+
 export const apiState = { key: (process.env.DEEPSEEK_API_KEY || "").trim() };
 
-export { handleHotspot, handleKey, handleTerm };
+export { handleHotspot, handleKey, handleTerm, handleSqlReview };
