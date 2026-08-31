@@ -29,7 +29,7 @@ export function LessonPage() {
             : p.deferredLabs,
         today: {
           ...p.today,
-          sql: lesson.track === "sql" || lesson.track === "ab" || lesson.track === "oral" ? "done" : p.today.sql,
+          sql: lesson.track === "sql" || lesson.track === "ab" || lesson.track === "oral" || lesson.track === "r" ? "done" : p.today.sql,
         },
       };
     });
@@ -53,7 +53,9 @@ export function LessonPage() {
             ? "Excel 对照"
             : lesson.track === "ab"
               ? "实验"
-              : "开口面试"}
+              : lesson.track === "r"
+                ? "R · 对照 Python"
+                : "开口面试"}
       </p>
       <h2 className="section-title">{lesson.title}</h2>
       <p className="lead">{lesson.summary}</p>
@@ -75,8 +77,8 @@ export function LessonPage() {
           </p>
           <p className="muted">{lesson.lab.prompt}</p>
           <div className="btn-row">
-            <Link className="btn" to={`/lab?task=${lesson.lab.id}`}>
-              打开 SQL 实验室
+            <Link className="btn" to={lesson.lab.lang === "r" ? `/lab?lang=r&task=${lesson.lab.id}` : `/lab?task=${lesson.lab.id}`}>
+              {lesson.lab.lang === "r" ? "打开 R 实验室" : "打开 SQL 实验室"}
             </Link>
             <button className="btn-ghost" onClick={skipLab}>
               晚点再做

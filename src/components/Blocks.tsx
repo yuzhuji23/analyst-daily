@@ -14,7 +14,7 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
               ))}
             </ul>
           );
-        if (b.type === "sql")
+        if (b.type === "sql" || b.type === "code")
           return (
             <pre className="sql" key={i}>
               <code>{b.code}</code>

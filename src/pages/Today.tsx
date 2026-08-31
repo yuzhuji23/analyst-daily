@@ -1,41 +1,34 @@
 import { Link } from "react-router-dom";
-import { caseProgress, labProgress, nextLab, nextLesson, pathProgress, todayCase } from "../data/catalog";
+import { caseProgress, labProgress, nextRLab, nextRLesson, nextSqlLab, nextSqlLesson, rProgress, sqlProgress, todayCase } from "../data/catalog";
 import { useDailyHotspot } from "../lib/hotspot";
 import { useProgress } from "../state";
+import type { Lesson } from "../types";
 
-const TRACK_NAME = {
-  sql: "今日一课 · SQL",
-  excel: "今日一课 · Excel",
-  ab: "今日一课 · 实验",
-  oral: "今日一课 · 开口",
-};
+function lessonBadge(lesson: Lesson, completed: string[], deferred: boolean) {
+  if (completed.includes(lesson.id)) return { text: "已完成", cls: "good" };
+  if (deferred) return { text: "晚点做", cls: "warn" };
+  return { text: "待做", cls: "" };
+}
 
 export function TodayPage() {
   const { progress } = useProgress();
   const { item: hotspot } = useDailyHotspot();
-  const lesson = nextLesson(progress.completed);
+  const sqlLesson = nextSqlLesson(progress.completed);
+  const rLesson = nextRLesson(progress.completed);
   const biz = todayCase(progress.casesDone);
-  const lab = nextLab(progress.completedLabs);
-  const pp = pathProgress(progress.completed);
+  const sqlLab = nextSqlLab(progress.completedLabs);
+  const rLab = nextRLab(progress.completedLabs);
+  const sp = sqlProgress(progress.completed);
+  const rp = rProgress(progress.completed);
   const cp = caseProgress(progress.casesDone);
   const lp = labProgress(progress.completedLabs);
-  const sqlBadge = progress.completed.includes(lesson.id)
-    ? "已完成"
-    : progress.today.sql === "deferred"
-      ? "晚点做"
-      : progress.today.sql === "done"
-        ? "继续"
-        : "待做";
+  const sqlMark = lessonBadge(sqlLesson, progress.completed, progress.today.sql === "deferred" && sqlLesson.track === "sql");
+  const rMark = lessonBadge(rLesson, progress.completed, false);
   const caseBadge = progress.casesDone.includes(biz.id)
     ? "已完成"
     : progress.today.case
       ? "继续"
       : "约 10 分钟";
-  const labBadge = progress.completedLabs.includes(lab.id)
-    ? "已完成"
-    : progress.today.lab
-      ? "继续"
-      : "待做";
 
   return (
     <div className="today-board">
@@ -73,40 +66,42 @@ export function TodayPage() {
 
       <div className="card today-slot">
         <header>
-          <h2>{TRACK_NAME[lesson.track]}</h2>
-          <span className={`badge ${progress.completed.includes(lesson.id) ? "good" : progress.today.sql === "deferred" ? "warn" : ""}`}>
-            {sqlBadge}
-          </span>
+          <h2>今日 SQL</h2>
+          <span className={`badge ${sqlMark.cls}`}>{sqlMark.text}</span>
         </header>
-        <p className="today-copy">{lesson.title}</p>
+        <p className="today-copy">{sqlLesson.title}</p>
         <div className="btn-row">
-          <Link className="btn" to={`/lesson/${lesson.id}`}>
+          <Link className="btn" to={`/lesson/${sqlLesson.id}`}>
             开始这一课
+          </Link>
+          <Link className="btn-ghost" to={`/lab?task=${sqlLab.id}`}>
+            实验室
           </Link>
         </div>
       </div>
 
       <div className="card today-slot">
         <header>
-          <h2>SQL 实验室</h2>
-          <span className={`badge ${progress.completedLabs.includes(lab.id) ? "good" : ""}`}>
-            {labBadge}
-          </span>
+          <h2>今日 R</h2>
+          <span className={`badge ${rMark.cls}`}>{rMark.text}</span>
         </header>
-        <p className="today-copy">{lab.title}</p>
+        <p className="today-copy">{rLesson.title}</p>
         <div className="btn-row">
-          <Link className="btn" to={`/lab?task=${lab.id}`}>
-            做这道实验
+          <Link className="btn" to={`/lesson/${rLesson.id}`}>
+            开始这一课
+          </Link>
+          <Link className="btn-ghost" to={`/lab?lang=r&task=${rLab.id}`}>
+            实验室
           </Link>
         </div>
       </div>
 
       <div className="today-foot">
         <span>
-          课程 {pp.done}/{pp.total} · 故事 {cp.done}/{cp.total} · 实验 {lp.done}/{lp.total}
+          SQL {sp.done}/{sp.total} · R {rp.done}/{rp.total} · 故事 {cp.done}/{cp.total} · 实验 {lp.done}/{lp.total}
         </span>
         <div className="progress-track">
-          <span style={{ width: `${(pp.done / pp.total) * 100}%` }} />
+          <span style={{ width: `${((sp.done + rp.done) / (sp.total + rp.total)) * 100}%` }} />
         </div>
       </div>
     </div>

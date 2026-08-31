@@ -1,25 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { allLabs, nextLab } from "../data/catalog";
+import { nextSqlLab, sqlLabs } from "../data/catalog";
 import { reviewSqlLab, type SqlReview } from "../lib/hotspot";
 import { checkQuery, execSql, getDb, SCHEMA_TEXT, type Grid } from "../lib/sqlEngine";
 import { useProgress } from "../state";
 import type { Database } from "sql.js";
+import { RLab } from "./RLab";
 
-export function LabPage() {
+function SqlLab() {
   const [params, setParams] = useSearchParams();
   const taskId = params.get("task");
   const { progress, setProgress } = useProgress();
-  const labs = useMemo(() => allLabs(), []);
-  const queued = nextLab(progress.completedLabs);
+  const labs = useMemo(() => sqlLabs(), []);
+  const queued = nextSqlLab(progress.completedLabs);
   const current = labs.find((t) => t.id === taskId) ?? queued;
   const [activeId, setActiveId] = useState(current.id);
   const task = labs.find((t) => t.id === activeId) ?? current;
-  const upcoming = nextLab(progress.completedLabs);
-
-  useEffect(() => {
-    if (taskId) setActiveId(taskId);
-  }, [taskId]);
+  const upcoming = nextSqlLab(progress.completedLabs);
 
   const [db, setDb] = useState<Database | null>(null);
   const [error, setError] = useState("");
@@ -52,6 +49,10 @@ export function LabPage() {
     setActiveId(id);
     setParams({ task: id }, { replace: true });
   };
+
+  useEffect(() => {
+    if (taskId && labs.some((t) => t.id === taskId)) setActiveId(taskId);
+  }, [taskId, labs]);
 
   const run = () => {
     if (!db) return;
@@ -97,10 +98,6 @@ export function LabPage() {
 
   return (
     <div>
-      <h2 className="section-title">SQL 实验室</h2>
-      <p className="lead">
-        模拟生活服务 App 的订单与行为数据。核对通过会记下进度，回来就是下一题。手机也能跑，电脑更舒服。
-      </p>
       {error && <p className="err">{error}</p>}
       <div className="grid-2">
         <div>
@@ -176,6 +173,47 @@ export function LabPage() {
           <p className="muted">日期范围约 2026-05-01 至 2026-08-27。订单状态含 paid / cancelled / created / refunded。</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function LabPage() {
+  const [params, setParams] = useSearchParams();
+  const taskId = params.get("task") ?? "";
+  const lang = params.get("lang") === "r" || taskId.startsWith("r-") ? "r" : "sql";
+
+  const openLang = (next: "sql" | "r") => {
+    if (next === "r") setParams({ lang: "r" }, { replace: true });
+    else setParams({}, { replace: true });
+  };
+
+  return (
+    <div>
+      <div className="lab-tabs">
+        <button type="button" className={lang === "sql" ? "active" : ""} onClick={() => openLang("sql")}>
+          SQL
+        </button>
+        <button type="button" className={lang === "r" ? "active" : ""} onClick={() => openLang("r")}>
+          R
+        </button>
+      </div>
+      {lang === "r" ? (
+        <>
+          <h2 className="section-title">R 实验室</h2>
+          <p className="lead">
+            同一门生活服务生意，表更小。对照 Python 的坑写在课里。第一次要加载浏览器里的 R，电脑更舒服。
+          </p>
+          <RLab />
+        </>
+      ) : (
+        <>
+          <h2 className="section-title">SQL 实验室</h2>
+          <p className="lead">
+            模拟生活服务 App 的订单与行为数据。核对通过会记下进度，回来就是下一题。手机也能跑，电脑更舒服。
+          </p>
+          <SqlLab />
+        </>
+      )}
     </div>
   );
 }

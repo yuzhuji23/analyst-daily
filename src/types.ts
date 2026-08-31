@@ -3,6 +3,7 @@ export type Block =
   | { type: "h"; text: string }
   | { type: "ul"; items: string[] }
   | { type: "sql"; code: string }
+  | { type: "code"; code: string }
   | { type: "callout"; title: string; text: string };
 
 export type QuizQuestion = {
@@ -15,6 +16,7 @@ export type QuizQuestion = {
 
 export type LabTask = {
   id: string;
+  lang?: "sql" | "r";
   title: string;
   prompt: string;
   hint: string;
@@ -24,7 +26,7 @@ export type LabTask = {
 
 export type Lesson = {
   id: string;
-  track: "sql" | "excel" | "ab" | "oral";
+  track: "sql" | "excel" | "ab" | "oral" | "r";
   order: number;
   title: string;
   minutes: number;
