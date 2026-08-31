@@ -6,6 +6,7 @@
   "functions": {
     "api/hotspot.ts": { "maxDuration": 60 },
     "api/term.ts": { "maxDuration": 30 },
-    "api/sql-review.ts": { "maxDuration": 30 }
+    "api/sql-review.ts": { "maxDuration": 30 },
+    "api/news-ask.ts": { "maxDuration": 30 }
   }
 }

@@ -393,6 +393,49 @@ input.secret {
 }
 .glossary-hit p { margin: 0.35rem 0 0; line-height: 1.65; font-size: 0.92rem; }
 .glossary-miss { margin: 0.4rem 0 0; }
+.glossary-miss a { text-decoration: underline; }
+.news-ask {
+  margin: -0.45rem 0 1rem;
+}
+.news-ask-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+}
+.news-ask-head p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.news-ask-log {
+  margin: 0 0 0.5rem;
+  max-height: 40vh;
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  padding: 0.65rem 0.75rem;
+}
+.news-ask-msg {
+  margin: 0 0 0.7rem;
+}
+.news-ask-msg:last-child { margin-bottom: 0; }
+.news-ask-msg span {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+.news-ask-msg p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  font-size: 0.92rem;
+}
+.news-ask-msg.user p { color: var(--ink); }
+.news-ask-wait { margin: 0.35rem 0 0; }
 
 .story-body p {
   font-size: 0.98rem;

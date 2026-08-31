@@ -480,6 +480,82 @@ ${student || "（空）"}
   }
 }
 
+async function handleNewsAsk(req: IncomingMessage, res: ServerResponse, state: { key: string }) {
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+  if (req.method !== "POST") {
+    send(res, 405, { item: null });
+    return;
+  }
+  let extra = "";
+  let question = "";
+  let title = "";
+  let source = "";
+  let brief = "";
+  let history: { role: string; text: string }[] = [];
+  try {
+    const raw = await readBody(req);
+    const body = raw
+      ? (JSON.parse(raw) as {
+          key?: string;
+          question?: string;
+          title?: string;
+          source?: string;
+          brief?: string;
+          history?: { role?: string; text?: string }[];
+        })
+      : {};
+    extra = typeof body.key === "string" ? body.key.trim() : "";
+    question = typeof body.question === "string" ? body.question.trim().slice(0, 400) : "";
+    title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
+    source = typeof body.source === "string" ? body.source.trim().slice(0, 40) : "";
+    brief = typeof body.brief === "string" ? body.brief.trim().slice(0, 2400) : "";
+    history = Array.isArray(body.history)
+      ? body.history
+          .slice(-6)
+          .map((m) => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            text: String(m.text || "").trim().slice(0, 500),
+          }))
+          .filter((m) => m.text)
+      : [];
+  } catch {
+    send(res, 200, { item: null });
+    return;
+  }
+  const apiKey = extra || state.key;
+  if (!apiKey || !question) {
+    send(res, 200, { item: null });
+    return;
+  }
+  const prior = history.map((m) => `${m.role === "assistant" ? "学长" : "学生"}：${m.text}`).join("\n");
+  try {
+    const row = await chat(
+      apiKey,
+      `读者是商业基础很弱的大四学生，在读今天这篇互联网新闻简报，有一句看不懂。请用大白话直接回答。
+
+今天这篇：
+标题：${title || "（还没有标题）"}
+来源：${source || "（未知）"}
+简报摘录：${brief || "（摘要很少，按标题能确定的内容答，不确定就标明是推断）"}
+
+${prior ? `刚才的对话：\n${prior}\n` : ""}学生现在问：${question}
+
+只输出 JSON：{"reply":""}
+要求：两三到五段人话；术语第一次出现用括号带一句；不要编造没有的数字；不要布置作业、不要反问一串问题；紧扣这篇，不要空泛框架。`,
+      800,
+      "你在带人看这篇新闻。只输出 JSON。不要提问。",
+    );
+    const reply = String(row?.reply || "").trim();
+    send(res, 200, { item: reply ? { reply } : null });
+  } catch {
+    send(res, 200, { item: null });
+  }
+}
+
 export const apiState = { key: (process.env.DEEPSEEK_API_KEY || "").trim() };
 
-export { handleHotspot, handleKey, handleTerm, handleSqlReview };
+export { handleHotspot, handleKey, handleTerm, handleSqlReview, handleNewsAsk };

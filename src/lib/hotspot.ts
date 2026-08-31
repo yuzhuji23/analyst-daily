@@ -265,3 +265,100 @@ ${body.student || "（空）"}
     window.clearTimeout(timer);
   }
 }
+
+export type NewsAskTurn = { role: "user" | "assistant"; text: string };
+
+export async function askNews(input: {
+  question: string;
+  title: string;
+  source: string;
+  brief: string;
+  history: NewsAskTurn[];
+}): Promise<string | null> {
+  const body = { ...input, key: readApiKey() };
+  try {
+    const res = await fetch("/api/news-ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { item?: { reply?: string } | null };
+      const reply = String(data.item?.reply || "").trim();
+      if (reply) return reply;
+    }
+  } catch {
+    /* GitHub Pages 没有这个接口，改走直连 */
+  }
+  return fromBrowserNewsAsk(body);
+}
+
+function newsAskPrompt(body: {
+  question: string;
+  title: string;
+  source: string;
+  brief: string;
+  history: NewsAskTurn[];
+}) {
+  const prior = body.history
+    .slice(-6)
+    .map((m) => `${m.role === "assistant" ? "学长" : "学生"}：${m.text}`)
+    .join("\n");
+  return `读者是商业基础很弱的大四学生，在读今天这篇互联网新闻简报，有一句看不懂。请用大白话直接回答。
+
+今天这篇：
+标题：${body.title || "（还没有标题）"}
+来源：${body.source || "（未知）"}
+简报摘录：${body.brief || "（摘要很少，按标题能确定的内容答，不确定就标明是推断）"}
+
+${prior ? `刚才的对话：\n${prior}\n` : ""}学生现在问：${body.question}
+
+只输出 JSON：{"reply":""}
+要求：两三到五段人话；术语第一次出现用括号带一句；不要编造没有的数字；不要布置作业、不要反问一串问题；紧扣这篇，不要空泛框架。`;
+}
+
+async function fromBrowserNewsAsk(body: {
+  key: string;
+  question: string;
+  title: string;
+  source: string;
+  brief: string;
+  history: NewsAskTurn[];
+}): Promise<string | null> {
+  if (!body.key || !body.question.trim()) return null;
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const res = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${body.key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        temperature: 0.3,
+        max_tokens: 800,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "你在带人看这篇新闻。只输出 JSON。不要提问。" },
+          { role: "user", content: newsAskPrompt(body) },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const text = data.choices?.[0]?.message?.content || "";
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end < start) return null;
+    const row = JSON.parse(text.slice(start, end + 1)) as { reply?: string };
+    const reply = String(row.reply || "").trim();
+    return reply || null;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}

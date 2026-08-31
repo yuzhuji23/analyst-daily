@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NewsAsk } from "./NewsAsk";
 import { TermSearch } from "./TermSearch";
 import { todayIso } from "../lib/progress";
 import { useProgress } from "../state";
@@ -15,7 +16,9 @@ const links = [
 export function Layout() {
   const { progress } = useProgress();
   const date = todayIso();
-  const home = useLocation().pathname === "/";
+  const path = useLocation().pathname;
+  const home = path === "/";
+  const news = path === "/news";
 
   useEffect(() => {
     document.documentElement.classList.toggle("lock-scroll", home);
@@ -43,6 +46,7 @@ export function Layout() {
         ))}
       </nav>
       <TermSearch />
+      {news ? <NewsAsk /> : null}
       <Outlet />
       <nav className="tabbar">
         {links.map((l) => (
