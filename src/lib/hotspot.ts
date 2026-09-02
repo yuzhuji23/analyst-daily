@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { NEWS_FEEDS, briefFor, rankCandidates, scoreNews, toHotspot } from "../data/news";
+import {
+  NEWS_FEEDS,
+  briefFor,
+  drillPrompt,
+  isCannedHotspot,
+  isGroundedBrief,
+  pickPrompt,
+  rankCandidates,
+  scoreNews,
+  teachPrompt,
+  toHotspot,
+} from "../data/news";
 import { newsDrill } from "../data/newsDrill";
 import { todayIso } from "./progress";
-import type { DailyHotspot, NewsCandidate } from "../types";
+import type { BriefSection, DailyHotspot, NewsCandidate, QuizQuestion } from "../types";
 
-const CACHE = "analyst-daily-hotspot-v5";
+const CACHE = "analyst-daily-hotspot-v6";
 const API_KEY = "analyst-deepseek-key";
 
 function strip(html: string) {
@@ -38,7 +49,9 @@ export function readHotspotCache(): DailyHotspot | null {
     if (!raw) return null;
     const row = JSON.parse(raw) as unknown;
     if (!isHotspot(row) || row.date !== todayIso()) return null;
-    return withDrill(row);
+    const item = withDrill(row);
+    if (isCannedHotspot(item)) return null;
+    return item;
   } catch {
     return null;
   }
@@ -96,7 +109,10 @@ async function fromServer(): Promise<DailyHotspot | null> {
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { item?: unknown };
-    return isHotspot(data.item) ? withDrill(data.item) : null;
+    if (!isHotspot(data.item)) return null;
+    const item = withDrill(data.item);
+    if (isCannedHotspot(item)) return null;
+    return item;
   } catch {
     return null;
   } finally {
@@ -135,10 +151,143 @@ async function pullClientFeed(url: string, name: string): Promise<NewsCandidate[
   }
 }
 
-async function fromClient(): Promise<DailyHotspot | null> {
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  const clipped = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const start = clipped.indexOf("{");
+  const end = clipped.lastIndexOf("}");
+  if (start < 0 || end < start) return null;
+  try {
+    return JSON.parse(clipped.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function asSections(raw: unknown): BriefSection[] | null {
+  if (!Array.isArray(raw)) return null;
+  const sections: BriefSection[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as { title?: unknown; paras?: unknown };
+    const title = String(row.title || "").trim();
+    const paras = Array.isArray(row.paras)
+      ? row.paras.map((s) => String(s).trim()).filter(Boolean)
+      : [];
+    if (title && paras.length) sections.push({ title, paras });
+  }
+  return sections.length >= 2 ? sections : null;
+}
+
+function asQuiz(raw: unknown): QuizQuestion[] | null {
+  if (!Array.isArray(raw) || raw.length < 3) return null;
+  const out: QuizQuestion[] = [];
+  for (const [i, item] of raw.slice(0, 3).entries()) {
+    if (!item || typeof item !== "object") return null;
+    const row = item as { prompt?: unknown; options?: unknown; answer?: unknown; why?: unknown };
+    const options = Array.isArray(row.options) ? row.options.map((s) => String(s).trim()).filter(Boolean) : [];
+    const answer = Number(row.answer);
+    const prompt = String(row.prompt || "").trim();
+    const why = String(row.why || "").trim();
+    if (!prompt || options.length < 2 || !Number.isInteger(answer) || answer < 0 || answer >= options.length) {
+      return null;
+    }
+    out.push({ id: `hot-${i + 1}`, prompt, options, answer, why: why || "回头对照简报里的那一步。" });
+  }
+  return out;
+}
+
+async function chatBrowser(
+  key: string,
+  user: string,
+  maxTokens: number,
+  system: string,
+): Promise<Record<string, unknown> | null> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 45000);
+  try {
+    const res = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        temperature: 0.3,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    return parseJsonObject(data.choices?.[0]?.message?.content || "");
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function fromClientPool(): Promise<NewsCandidate[]> {
   const batches = await Promise.all(NEWS_FEEDS.map((f) => pullClientFeed(f.url, f.name)));
-  const ranked = rankCandidates(batches.flat());
-  const row = ranked[0];
+  return rankCandidates(batches.flat()).slice(0, 12);
+}
+
+async function fromBrowserHotspot(key: string): Promise<DailyHotspot | null> {
+  const pool = await fromClientPool();
+  if (!pool.length) return null;
+  const catalog = pool
+    .map((row, i) => `${i}. 【${row.source}】${row.title}\n${(row.summary || "").slice(0, 180)}`)
+    .join("\n\n");
+  const picked = await chatBrowser(
+    key,
+    pickPrompt(catalog),
+    80,
+    "你在挑今天最值得拆的一条互联网新闻。只输出 JSON。",
+  );
+  const index = Math.max(0, Math.min(Number(picked?.index) || 0, pool.length - 1));
+  const row = pool[index];
+  if (!row) return null;
+
+  const teach = async (extra?: string) => {
+    const taught = await chatBrowser(
+      key,
+      teachPrompt(row, extra),
+      2800,
+      "你在写今天这一条新闻的讲解，只讲这篇，禁止套话讲义。只输出 JSON。",
+    );
+    const sections = asSections(taught?.sections);
+    if (!sections || !isGroundedBrief(sections, row.title, row.summary)) return null;
+    return sections;
+  };
+
+  const sections =
+    (await teach()) ||
+    (await teach("上一稿写成了套话或没点这篇的公司/数字。重写。每一段都必须出现标题里的公司或数字。"));
+  if (!sections) return null;
+
+  const drilled = await chatBrowser(
+    key,
+    drillPrompt(row),
+    1400,
+    "你在根据这篇新闻出题。只输出 JSON。",
+  );
+  const quiz = asQuiz(drilled?.quiz);
+  const method = String(drilled?.method || "").trim();
+  return toHotspot(todayIso(), row, sections, {
+    quiz: quiz ?? newsDrill(row.title, row.summary).quiz,
+    method: method || newsDrill(row.title, row.summary).method,
+  });
+}
+
+async function fromClient(): Promise<DailyHotspot | null> {
+  const pool = await fromClientPool();
+  const row = pool[0];
   if (!row) return null;
   return toHotspot(todayIso(), row, briefFor(row.title, row.summary));
 }
@@ -146,7 +295,21 @@ async function fromClient(): Promise<DailyHotspot | null> {
 export async function loadHotspot(): Promise<DailyHotspot | null> {
   const cached = readHotspotCache();
   if (cached) return cached;
-  const item = (await fromServer()) ?? (await fromClient());
+  const server = await fromServer();
+  if (server?.usedAi) {
+    writeCache(withDrill({ ...server, date: todayIso() }));
+    return server;
+  }
+  const key = readApiKey();
+  if (key) {
+    const ai = await fromBrowserHotspot(key);
+    if (ai) {
+      const row = withDrill({ ...ai, date: todayIso(), usedAi: true });
+      writeCache(row);
+      return row;
+    }
+  }
+  const item = server ?? (await fromClient());
   if (item) writeCache(withDrill({ ...item, date: todayIso() }));
   return item;
 }

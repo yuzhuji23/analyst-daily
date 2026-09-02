@@ -1,11 +1,22 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
-import { NEWS_FEEDS, briefFor, rankCandidates, scoreNews, toHotspot } from "../src/data/news";
+import {
+  NEWS_FEEDS,
+  briefFor,
+  drillPrompt,
+  isCannedHotspot,
+  isGroundedBrief,
+  pickPrompt,
+  rankCandidates,
+  scoreNews,
+  teachPrompt,
+  toHotspot,
+} from "../src/data/news";
 import { newsDrill } from "../src/data/newsDrill";
 import type { BriefSection, DailyHotspot, NewsCandidate, QuizQuestion } from "../src/types";
 
-type Cache = { date: string; item: DailyHotspot | null; usedAi: boolean };
+type Cache = { date: string; item: DailyHotspot | null; usedAi: boolean; triedAt: number };
 let cache: Cache | null = null;
 let inflight: Promise<DailyHotspot | null> | null = null;
 
@@ -156,7 +167,7 @@ async function chat(key: string, user: string, maxTokens: number, system?: strin
           role: "system",
           content:
             system ||
-            "你是带大四学生看互联网商业新闻的学长。对方商业基础弱。只用大白话。只输出 JSON。不要提问，不要布置作业，不要解释你是怎么实现的。",
+            "你是带大四学生看今天这一条互联网新闻的学长。只讲这篇里的公司、动作和数字。只用大白话。只输出 JSON。禁止套话讲义。不要提问，不要布置作业。",
         },
         { role: "user", content: user },
       ],
@@ -167,61 +178,70 @@ async function chat(key: string, user: string, maxTokens: number, system?: strin
   return parseJsonObject(data.choices?.[0]?.message?.content || "");
 }
 
+function htmlToText(html: string) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function articleBody(url: string): Promise<string> {
+  if (!url) return "";
+  try {
+    const html = await getText(url);
+    const text = htmlToText(html);
+    if (text.length < 80) return "";
+    return text.slice(0, 2800);
+  } catch {
+    return "";
+  }
+}
+
+async function teachOnce(key: string, row: NewsCandidate, extra?: string) {
+  const taught = await chat(key, teachPrompt(row, extra), 2800);
+  const sections = asSections(taught?.sections);
+  if (!sections || !isGroundedBrief(sections, row.title, row.summary)) return null;
+  return sections;
+}
+
 async function askDeepseek(key: string, pool: NewsCandidate[]) {
   const catalog = pool
-    .map((row, i) => `${i}. 【${row.source}】${row.title}\n${(row.summary || "").slice(0, 90)}`)
+    .map((row, i) => `${i}. 【${row.source}】${row.title}\n${(row.summary || "").slice(0, 180)}`)
     .join("\n\n");
-  const picked = await chat(
-    key,
-    `选出对互联网数据分析/数据运营岗最值得学的【一条】。优先：财报、补贴与一单赚不赚钱、投放效率、大厂业务动作、竞争。不要：数码评测、纯融资八卦、没有业务可练的软文。\n\n只输出：{"index":数字}\n\n候选：\n${catalog}`,
-    80,
-  );
+  const picked = await chat(key, pickPrompt(catalog), 80);
   const index = Math.max(0, Math.min(Number(picked?.index) || 0, pool.length - 1));
   const row = pool[index];
   if (!row) return null;
 
-  const taught = await chat(
-    key,
-    `读者是商业基础很弱的大四学生，准备进互联网分析岗。请根据下面这篇新闻，写一份能直接读懂的讲解。有数字就用人话解释它代表什么；没有的事实不要编。术语第一次出现时用括号解释，例如 ARPU（平均每个用户带来的收入）。
+  const body = await articleBody(row.url);
+  const source = {
+    ...row,
+    summary: body
+      ? `${row.summary || ""}\n${body}`.replace(/\s+/g, " ").trim().slice(0, 3200)
+      : row.summary,
+  };
 
-必须按这个结构写，可以比示例更长、更具体：
-1. 「这篇在讲什么」：假设对方完全没读过。讲清哪家公司、发生了什么、关键数字、为什么今天值得看。3到5段，每段2到4句。
-2. 「跟着看懂」：用「第一步 / 第二步 / 第三步…」带对方走逻辑。每一步先说人话，再说这件事里钱、用户或竞争是怎么动的，以及看哪个数能验证。写 4 到 6 步。
-3. 「你要带走的」：这条对应的商业常识，以及以后看到同类新闻怎么想。2到3段。最后一段用「记住：」开头，给一句能留住的话。
-
-结合这篇的公司名和事实，禁止空泛框架，禁止问答。
-
-标题：${row.title}
-来源：${row.source}
-正文摘录：${row.summary || "（摘要很少，请严格按标题能确定的内容写，不确定的标明是推断）"}
-
-只输出：{"sections":[{"title":"这篇在讲什么","paras":["",""]},{"title":"跟着看懂","paras":["第一步：", "第二步："]},{"title":"你要带走的","paras":["","记住："]}]}`,
-    2400,
-  );
-  const sections = asSections(taught?.sections);
+  const sections =
+    (await teachOnce(key, source)) ||
+    (await teachOnce(
+      key,
+      source,
+      "上一稿写成了套话或没点这篇的公司/数字。重写。每一段都必须出现标题里的公司或数字，禁止讲义腔。",
+    ));
   if (!sections) return null;
 
-  const drilled = await chat(
-    key,
-    `读者是商业基础很弱的大四学生。根据这篇新闻出 3 道选择题，把简报里的逻辑练住。
-
-要求：
-- 每题 4 个选项，只有 1 个对；answer 是从 0 开始的序号
-- 结合这篇的公司名和事实，不要空泛送分题，不要提问式标题
-- why 用一两句人话
-- method 写一段「这类题以后怎么拆」的通用解法，不要只复述这篇
-
-标题：${row.title}
-来源：${row.source}
-摘录：${row.summary || "（摘要很少，请严格按标题能确定的内容出题）"}
-
-只输出：{"method":"","quiz":[{"prompt":"","options":["","","",""],"answer":0,"why":""},{"prompt":"","options":["","","",""],"answer":1,"why":""},{"prompt":"","options":["","","",""],"answer":2,"why":""}]}`,
-    1400,
-  );
+  const drilled = await chat(key, drillPrompt(source), 1400);
   const quiz = asQuiz(drilled?.quiz);
   const method = String(drilled?.method || "").trim();
-  const fallback = newsDrill(row.title, row.summary);
-  return toHotspot(todayShanghai(), row, sections, {
+  const fallback = newsDrill(source.title, source.summary);
+  return toHotspot(todayShanghai(), source, sections, {
     quiz: quiz ?? fallback.quiz,
     method: method || fallback.method,
   });
@@ -235,22 +255,32 @@ async function buildHotspot(apiKey: string): Promise<{ item: DailyHotspot | null
   if (apiKey) {
     try {
       const ai = await askDeepseek(apiKey, pool);
-      if (ai) return { item: ai, usedAi: true };
+      if (ai) return { item: { ...ai, usedAi: true }, usedAi: true };
     } catch {
       /* fall through */
     }
   }
   const row = pool[0];
-  return { item: toHotspot(todayShanghai(), row, briefFor(row.title, row.summary)), usedAi: false };
+  return {
+    item: { ...toHotspot(todayShanghai(), row, briefFor(row.title, row.summary)), usedAi: false },
+    usedAi: false,
+  };
 }
 
 async function dailyHotspot(apiKey: string) {
   const date = todayShanghai();
-  if (cache?.date === date && (cache.usedAi || !apiKey) && hasDrill(cache.item)) return cache.item;
+  const fresh =
+    cache?.date === date &&
+    hasDrill(cache.item) &&
+    cache.item &&
+    !isCannedHotspot(cache.item);
+  const aiReady = cache?.usedAi || !apiKey;
+  const cooldown = cache && Date.now() - cache.triedAt < 15 * 60 * 1000;
+  if (fresh && (aiReady || cooldown)) return cache.item;
   if (!inflight) {
     inflight = buildHotspot(apiKey)
       .then((row) => {
-        cache = { date, item: row.item, usedAi: row.usedAi };
+        cache = { date, item: row.item, usedAi: row.usedAi, triedAt: Date.now() };
         return row.item;
       })
       .finally(() => {
@@ -322,7 +352,8 @@ async function handleHotspot(req: IncomingMessage, res: ServerResponse, state: {
   try {
     const item = await dailyHotspot(extra || state.key);
     send(res, 200, { item });
-  } catch {
+  } catch (err) {
+    console.error("[hotspot]", err);
     send(res, 200, { item: null });
   }
 }

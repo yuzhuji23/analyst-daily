@@ -275,12 +275,29 @@ const GENERIC = {
   ],
 };
 
+function whoOf(title: string, desc: string): string {
+  const hit = `${title} ${desc}`.match(
+    /阿里巴巴|阿里|腾讯|字节跳动|字节|美团|拼多多|京东|快手|抖音|小红书|网易|哔哩哔哩|B站|百度|华为|小米|苹果|谷歌|微软|亚马逊|OpenAI|蚂蚁|滴滴|携程|理想|蔚来|小鹏|英伟达|特斯拉|DeepSeek/,
+  );
+  return hit?.[0] || title.replace(/[【】[\]（）()｜|：:].*$/, "").trim().slice(0, 10) || "这家公司";
+}
+
+function fill(text: string, who: string): string {
+  return text.replaceAll("这家公司", who).replaceAll("营收涨了", `${who}的营收涨了`);
+}
+
 export function newsDrill(title: string, desc: string): { quiz: QuizQuestion[]; method: string } {
   const text = `${title} ${desc}`;
+  const who = whoOf(title, desc);
   const hit = DRILLS.find((d) => d.test.test(text));
   const row = hit ?? GENERIC;
   return {
-    method: row.method,
-    quiz: row.quiz.map((item, i) => ({ ...item, id: `hot-${i + 1}` })),
+    method: fill(row.method, who),
+    quiz: row.quiz.map((item, i) => ({
+      ...item,
+      id: `hot-${i + 1}`,
+      prompt: fill(item.prompt, who),
+      why: fill(item.why, who),
+    })),
   };
 }

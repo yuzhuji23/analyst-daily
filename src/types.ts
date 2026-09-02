@@ -92,4 +92,5 @@ export type DailyHotspot = {
   sections: BriefSection[];
   quiz: QuizQuestion[];
   method: string;
+  usedAi?: boolean;
 };
